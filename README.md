@@ -50,4 +50,5 @@ The app should then be available at `http://localhost:3000`.
 - Product data is sourced from `flipkart_com-ecommerce_sample.csv`.
 - Generated retrieval data is stored under `.support-agent-data/` and should not be committed.
 - Environment secrets should stay in local `.env*` files and should not be committed.
-- Set `NEXT_PUBLIC_CHAT_DEBUG=true` only when you want the chat page to show cited products and retrieved context for debugging.
+- `npm run dev` shows confidence scores and retrieved context automatically.
+- In production, keep `NEXT_PUBLIC_CHAT_DEBUG=false` unless you explicitly want to expose chat debug details.

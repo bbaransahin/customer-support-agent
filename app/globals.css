@@ -274,9 +274,13 @@ th {
 }
 
 .chat-shell {
+  width: min(100%, 820px);
+  margin: 0 auto;
+}
+
+.chat-page {
   display: grid;
-  grid-template-columns: 1.45fr 1fr;
-  gap: 1rem;
+  justify-items: center;
 }
 
 .chat-log {

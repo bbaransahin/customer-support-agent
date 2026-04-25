@@ -1,0 +1,2 @@
+{"timestamp":"2026-04-25T15:32:51.902Z","sessionStartedAt":"2026-04-25T15:32:30.695Z","event":"request","history":[{"role":"user","content":"Are there any pet related products?"}],"state":{"activeProductIds":[],"candidateProductIds":[],"lastIntent":null,"lastAppliedFilters":null,"pendingClarification":null}}
+{"timestamp":"2026-04-25T15:32:58.467Z","sessionStartedAt":"2026-04-25T15:32:30.695Z","event":"error","error":"Cannot read properties of undefined (reading 'trim')"}

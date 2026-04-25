@@ -1,24 +1,17 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { createEmptyConversationState, createEmptyDebugContext } from "@/lib/conversation-state";
-import type {
-  ChatDebugContext,
-  ChatResponsePayload,
-  ChatStreamEvent,
-  ChatTurn,
-  ConversationState,
-  ProductMatch,
-} from "@/lib/types";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { createEmptyConversationState } from "@/lib/conversation-state";
+import type { ChatResponsePayload, ChatStreamEvent, ChatTurn, ConversationState, ProductMatch } from "@/lib/types";
 
 type Message = ChatTurn & {
   responseType?: ChatResponsePayload["responseType"];
   products?: ProductMatch[];
 };
 
-const SHOW_CHAT_DEBUG = process.env.NEXT_PUBLIC_CHAT_DEBUG === "true";
-
 export function ChatPanel() {
+  const chatLogRef = useRef<HTMLDivElement | null>(null);
+  const [sessionStartedAt] = useState(() => new Date().toISOString());
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,9 +19,16 @@ export function ChatPanel() {
   const [conversationState, setConversationState] = useState<ConversationState>(
     createEmptyConversationState(),
   );
-  const [debugContext, setDebugContext] = useState<ChatDebugContext>({
-    ...createEmptyDebugContext(),
-  });
+
+  useEffect(() => {
+    const chatLog = chatLogRef.current;
+    if (!chatLog) return;
+
+    chatLog.scrollTo({
+      top: chatLog.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -54,6 +54,7 @@ export function ChatPanel() {
             content: body,
           })),
           state: conversationState,
+          sessionStartedAt,
         }),
       });
 
@@ -103,7 +104,6 @@ export function ChatPanel() {
             ),
           );
           setConversationState(payload.state);
-          setDebugContext(payload.debugContext);
         };
 
         while (true) {
@@ -169,7 +169,6 @@ export function ChatPanel() {
         },
       ]);
       setConversationState(payload.state);
-      setDebugContext(payload.debugContext);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Chat request failed.");
     } finally {
@@ -177,11 +176,18 @@ export function ChatPanel() {
     }
   }
 
+  function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+
   return (
     <div className="chat-shell">
       <section className="panel">
         <h2>Support conversation</h2>
-        <div className="chat-log">
+        <div className="chat-log" ref={chatLogRef}>
           {messages.length === 0 ? (
             <div className="muted">
               Ask about products, brands, categories, price points, or listed specifications.
@@ -218,6 +224,7 @@ export function ChatPanel() {
             <span className="label">Question</span>
             <textarea
               onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleInputKeyDown}
               placeholder="Which products mention microfiber or sofa bed dimensions?"
               rows={4}
               value={input}
@@ -231,31 +238,6 @@ export function ChatPanel() {
           </div>
         </form>
       </section>
-
-      {SHOW_CHAT_DEBUG ? (
-        <aside className="panel">
-          <h2>Chat debug</h2>
-          <p>Strategy: {debugContext.retrievalStrategy}</p>
-          {debugContext.appliedFilters ? (
-            <p>
-              Filters: {JSON.stringify(debugContext.appliedFilters)}
-            </p>
-          ) : null}
-          {debugContext.retrievedContext.length === 0 ? (
-            <p className="muted">The latest answer did not use semantic catalog evidence.</p>
-          ) : (
-            <div className="page-grid">
-              {debugContext.retrievedContext.map((item) => (
-                <div className="detail-card" key={`${item.productId}-${item.productName}`}>
-                  <strong>{item.productName}</strong>
-                  <p>Similarity: {item.score.toFixed(3)}</p>
-                  <p>{item.summary}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
-      ) : null}
     </div>
   );
 }

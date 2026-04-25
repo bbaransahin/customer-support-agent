@@ -95,6 +95,10 @@ type TurnAnalysis = {
 
 type StreamTextCallback = (delta: string) => Promise<void> | void;
 
+function normalizeOutputText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export async function answerCatalogQuestion(
   history: ChatTurn[],
   state: ConversationState = createEmptyConversationState(),
@@ -418,7 +422,7 @@ async function handleCatalogQaIntentStream(
   });
 
   if (!Symbol.asyncIterator || !(Symbol.asyncIterator in stream)) {
-    const message = "output_text" in stream ? stream.output_text.trim() : "";
+    const message = "output_text" in stream ? normalizeOutputText(stream.output_text) : "";
     if (!message) {
       throw new Error("The model returned an empty response.");
     }
@@ -454,7 +458,7 @@ async function handleCatalogQaIntentStream(
     }
 
     if (event.type === "response.completed") {
-      completedMessage = event.response.output_text.trim();
+      completedMessage = normalizeOutputText(event.response.output_text);
     }
 
     if (event.type === "response.failed") {

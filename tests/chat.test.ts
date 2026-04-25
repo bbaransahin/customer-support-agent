@@ -212,6 +212,43 @@ describe("chat orchestration", () => {
     expect(response.message).toContain("microfiber upholstery");
   });
 
+  it("falls back to streamed deltas when the completed event has no output_text", async () => {
+    const retrievedContext: RetrievedContext[] = [
+      {
+        productId: "1",
+        productName: "Alpha Sofa",
+        score: 0.82,
+        summary: "Material: Microfiber",
+      },
+    ];
+    retrievalMocks.retrieveRelevantDocuments.mockResolvedValue(retrievedContext);
+    openAiMocks.create.mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "response.output_text.delta",
+          delta: "Alpha Sofa ",
+        };
+        yield {
+          type: "response.output_text.delta",
+          delta: "mentions microfiber.",
+        };
+        yield {
+          type: "response.completed",
+          response: {},
+        };
+      },
+    });
+
+    const response = await answerCatalogQuestion(
+      [{ role: "user", content: "Are there any pet related products?" }],
+      createEmptyConversationState(),
+    );
+
+    expect(response.intent).toBe("catalog_qa");
+    expect(response.responseType).toBe("answer");
+    expect(response.message).toBe("Alpha Sofa mentions microfiber.");
+  });
+
   it("reuses prior search filters for cheaper follow-ups", async () => {
     retrievalMocks.structuredSearchProducts.mockResolvedValue([products[1]]);
 

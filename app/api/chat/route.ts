@@ -1,12 +1,28 @@
 import { NextResponse } from "next/server";
 import { answerCatalogQuestionStream } from "@/lib/chat";
+import { appendChatSessionLog, createChatSessionTimestamp } from "@/lib/chat-logging";
 import { createEmptyConversationState } from "@/lib/conversation-state";
 import type { ChatStreamEvent, ChatTurn, ConversationState } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { history?: ChatTurn[]; state?: ConversationState };
+    const body = (await request.json()) as {
+      history?: ChatTurn[];
+      state?: ConversationState;
+      sessionStartedAt?: string;
+    };
     const history = Array.isArray(body.history) ? body.history : [];
+    const state = body.state ?? createEmptyConversationState();
+    const sessionStartedAt = body.sessionStartedAt || createChatSessionTimestamp();
+
+    await appendChatSessionLog({
+      timestamp: new Date().toISOString(),
+      sessionStartedAt,
+      event: "request",
+      history,
+      state,
+    });
+
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -17,7 +33,7 @@ export async function POST(request: Request) {
         try {
           const response = await answerCatalogQuestionStream(
             history,
-            body.state ?? createEmptyConversationState(),
+            state,
             (delta) => {
               send({
                 type: "delta",
@@ -30,10 +46,25 @@ export async function POST(request: Request) {
             type: "done",
             payload: response,
           });
+
+          await appendChatSessionLog({
+            timestamp: new Date().toISOString(),
+            sessionStartedAt,
+            event: "response",
+            payload: response,
+          });
         } catch (error) {
+          const message = error instanceof Error ? error.message : "Chat request failed.";
           send({
             type: "error",
-            error: error instanceof Error ? error.message : "Chat request failed.",
+            error: message,
+          });
+
+          await appendChatSessionLog({
+            timestamp: new Date().toISOString(),
+            sessionStartedAt,
+            event: "error",
+            error: message,
           });
         } finally {
           controller.close();
