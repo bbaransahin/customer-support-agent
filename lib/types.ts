@@ -74,6 +74,10 @@ export type RetrievedContext = {
   summary: string;
 };
 
+export type PromptRetrievedContext = RetrievedContext & {
+  evidenceText: string;
+};
+
 export type ChatIntent =
   | "search"
   | "detail_lookup"

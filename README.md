@@ -42,6 +42,7 @@ The app should then be available at `http://localhost:3000`.
 - `npm run start` runs the production server.
 - `npm run lint` runs ESLint.
 - `npm run test` runs the Vitest test suite once.
+- `npm run test:live` runs the opt-in live chat evaluation suite against the real OpenAI API and writes `test-results/chat-live-report.json`.
 - `npm run test:watch` runs Vitest in watch mode.
 - `npm run reindex` rebuilds the local embedding index from the product CSV.
 
@@ -50,5 +51,6 @@ The app should then be available at `http://localhost:3000`.
 - Product data is sourced from `flipkart_com-ecommerce_sample.csv`.
 - Generated retrieval data is stored under `.support-agent-data/` and should not be committed.
 - Environment secrets should stay in local `.env*` files and should not be committed.
+- Live evaluations require both `OPENAI_API_KEY` and a fresh local index from `npm run reindex`.
 - `npm run dev` shows confidence scores and retrieved context automatically.
 - In production, keep `NEXT_PUBLIC_CHAT_DEBUG=false` unless you explicitly want to expose chat debug details.

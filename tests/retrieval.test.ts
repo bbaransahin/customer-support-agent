@@ -1,4 +1,4 @@
-import { cosineSimilarity, filterProducts, searchRelevantDocuments } from "@/lib/retrieval";
+import { buildPromptEvidence, cosineSimilarity, filterProducts, searchRelevantDocuments, toDebugRetrievedContext } from "@/lib/retrieval";
 import type { EmbeddingIndex, ProductRecord } from "@/lib/types";
 
 const products: ProductRecord[] = [
@@ -104,5 +104,46 @@ describe("retrieval utilities", () => {
 
     const results = searchRelevantDocuments(index, [1, 0], 1);
     expect(results[0]?.productName).toBe("Alpha Sofa");
+    expect(results[0]?.summary).toBe("Microfiber sofa bed");
+    expect(results[0]?.evidenceText).toBe("Alpha Sofa Microfiber");
+  });
+
+  it("builds longer prompt evidence while preserving tail facts", () => {
+    const text = `${"A".repeat(900)}\nWarranty: 6 months domestic warranty`;
+
+    const evidence = buildPromptEvidence(text, 240);
+
+    expect(evidence.length).toBeLessThanOrEqual(240);
+    expect(evidence).toContain("Warranty: 6 months domestic warranty");
+    expect(evidence).toContain("[...]");
+  });
+
+  it("surfaces question-matching evidence snippets for prompt assembly", () => {
+    const text = `${"Intro ".repeat(80)}Warranty Summary 6 Months Domestic Warranty${" Tail".repeat(80)}`;
+
+    const evidence = buildPromptEvidence(text, 260, "Which product mentions a 6 months domestic warranty?");
+
+    expect(evidence).toContain("6 Months Domestic Warranty");
+  });
+
+  it("keeps debug retrieval context compact", () => {
+    const debugContext = toDebugRetrievedContext([
+      {
+        productId: "1",
+        productName: "Alpha Sofa",
+        score: 0.91,
+        summary: "Microfiber sofa bed",
+        evidenceText: "Longer prompt-facing evidence",
+      },
+    ]);
+
+    expect(debugContext).toEqual([
+      {
+        productId: "1",
+        productName: "Alpha Sofa",
+        score: 0.91,
+        summary: "Microfiber sofa bed",
+      },
+    ]);
   });
 });

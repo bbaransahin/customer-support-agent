@@ -1,6 +1,6 @@
 import { createEmptyConversationState } from "@/lib/conversation-state";
 import { answerCatalogQuestion } from "@/lib/chat";
-import type { ProductRecord, RetrievedContext } from "@/lib/types";
+import type { ProductRecord, PromptRetrievedContext, RetrievedContext } from "@/lib/types";
 
 const products: ProductRecord[] = [
   {
@@ -69,6 +69,7 @@ const retrievalMocks = vi.hoisted(() => ({
   retrieveRelevantDocuments: vi.fn(),
   structuredSearchProducts: vi.fn(),
   toProductMatch: vi.fn(),
+  toDebugRetrievedContext: vi.fn(),
   pickConfidentDocuments: vi.fn(),
 }));
 
@@ -83,6 +84,7 @@ vi.mock("@/lib/retrieval", () => ({
   resolveProductsByReference: retrievalMocks.resolveProductsByReference,
   retrieveRelevantDocuments: retrievalMocks.retrieveRelevantDocuments,
   structuredSearchProducts: retrievalMocks.structuredSearchProducts,
+  toDebugRetrievedContext: retrievalMocks.toDebugRetrievedContext,
   toProductMatch: retrievalMocks.toProductMatch,
 }));
 
@@ -120,6 +122,15 @@ describe("chat orchestration", () => {
       confidence,
     }));
     retrievalMocks.pickConfidentDocuments.mockImplementation((results: RetrievedContext[]) => results);
+    retrievalMocks.toDebugRetrievedContext.mockImplementation(
+      (results: Array<RetrievedContext & { evidenceText?: string }>) =>
+        results.map(({ productId, productName, score, summary }) => ({
+          productId,
+          productName,
+          score,
+          summary,
+        })),
+    );
     openAiMocks.create.mockResolvedValue({
       output_text: "Alpha Sofa mentions microfiber upholstery in the catalog.",
     });
@@ -190,12 +201,13 @@ describe("chat orchestration", () => {
   });
 
   it("uses semantic retrieval for catalog QA questions", async () => {
-    const retrievedContext: RetrievedContext[] = [
+    const retrievedContext: PromptRetrievedContext[] = [
       {
         productId: "1",
         productName: "Alpha Sofa",
         score: 0.82,
         summary: "Material: Microfiber",
+        evidenceText: "Material: Microfiber\nWarranty: 6 months",
       },
     ];
     retrievalMocks.retrieveRelevantDocuments.mockResolvedValue(retrievedContext);
@@ -208,17 +220,25 @@ describe("chat orchestration", () => {
     expect(response.intent).toBe("catalog_qa");
     expect(response.responseType).toBe("answer");
     expect(response.debugContext.retrievalStrategy).toBe("semantic_catalog");
-    expect(response.debugContext.retrievedContext).toEqual(retrievedContext);
-    expect(response.message).toContain("microfiber upholstery");
-  });
-
-  it("falls back to streamed deltas when the completed event has no output_text", async () => {
-    const retrievedContext: RetrievedContext[] = [
+    expect(response.debugContext.retrievedContext).toEqual<RetrievedContext[]>([
       {
         productId: "1",
         productName: "Alpha Sofa",
         score: 0.82,
         summary: "Material: Microfiber",
+      },
+    ]);
+    expect(response.message).toContain("microfiber upholstery");
+  });
+
+  it("falls back to streamed deltas when the completed event has no output_text", async () => {
+    const retrievedContext: PromptRetrievedContext[] = [
+      {
+        productId: "1",
+        productName: "Alpha Sofa",
+        score: 0.82,
+        summary: "Material: Microfiber",
+        evidenceText: "Material: Microfiber",
       },
     ];
     retrievalMocks.retrieveRelevantDocuments.mockResolvedValue(retrievedContext);
@@ -247,6 +267,33 @@ describe("chat orchestration", () => {
     expect(response.intent).toBe("catalog_qa");
     expect(response.responseType).toBe("answer");
     expect(response.message).toBe("Alpha Sofa mentions microfiber.");
+  });
+
+  it("passes prompt evidence beyond the short summary cutoff into catalog QA prompts", async () => {
+    const retrievedContext: PromptRetrievedContext[] = [
+      {
+        productId: "1",
+        productName: "FabHomeDecor Fabric Double Sofa Bed",
+        score: 0.93,
+        summary: "FabHomeDecor Fabric Double Sofa Bed\nBrand: FabHomeDecor",
+        evidenceText: `${"Catalog line. ".repeat(60)}Warranty: 6 months domestic warranty`,
+      },
+    ];
+    retrievalMocks.retrieveRelevantDocuments.mockResolvedValue(retrievedContext);
+
+    await answerCatalogQuestion(
+      [{ role: "user", content: "Which product mentions a 6 months domestic warranty?" }],
+      createEmptyConversationState(),
+    );
+
+    expect(openAiMocks.create).toHaveBeenCalledTimes(1);
+    const request = openAiMocks.create.mock.calls[0][0];
+    const promptText = request.input
+      .map((message: { content: string }) => message.content)
+      .join("\n\n");
+
+    expect(promptText).toContain("FabHomeDecor Fabric Double Sofa Bed");
+    expect(promptText).toContain("Warranty: 6 months domestic warranty");
   });
 
   it("reuses prior search filters for cheaper follow-ups", async () => {

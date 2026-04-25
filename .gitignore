@@ -8,6 +8,7 @@ dist/
 
 # Test outputs
 coverage/
+test-results/
 
 # Local app data
 .support-agent-data/

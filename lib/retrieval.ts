@@ -4,6 +4,7 @@ import { getEmbeddingBatch } from "@/lib/openai";
 import { readIndex, writeIndex } from "@/lib/index-store";
 import type {
   EmbeddingIndex,
+  PromptRetrievedContext,
   ProductMatch,
   ProductFilters,
   ProductListResult,
@@ -138,29 +139,35 @@ export async function resolveProductsByReference(reference: string, limit = 5) {
   }));
 }
 
-export async function retrieveRelevantDocuments(question: string, topK = 5): Promise<RetrievedContext[]> {
+export async function retrieveRelevantDocuments(question: string, topK = 5): Promise<PromptRetrievedContext[]> {
   const index = await readIndex();
   if (!index) {
     throw new Error("No index available. Run reindex first.");
   }
 
   const [queryEmbedding] = await getEmbeddingBatch([question], index.metadata.model);
-  return searchRelevantDocuments(index, queryEmbedding, topK);
+  return searchRelevantDocuments(index, queryEmbedding, topK, question);
 }
 
-export function searchRelevantDocuments(index: EmbeddingIndex, queryEmbedding: number[], topK = 5) {
+export function searchRelevantDocuments(
+  index: EmbeddingIndex,
+  queryEmbedding: number[],
+  topK = 5,
+  question?: string,
+) {
   return index.documents
     .map((doc) => ({
       productId: doc.productId,
       productName: doc.productName,
       summary: doc.summary,
+      evidenceText: buildPromptEvidence(doc.text, 1200, question),
       score: cosineSimilarity(queryEmbedding, doc.embedding),
     }))
     .sort((left, right) => right.score - left.score)
     .slice(0, topK);
 }
 
-export function pickConfidentDocuments(results: RetrievedContext[], minimumScore = 0.2) {
+export function pickConfidentDocuments<T extends { score: number }>(results: T[], minimumScore = 0.2) {
   return results.filter((item) => item.score >= minimumScore);
 }
 
@@ -179,6 +186,118 @@ export function cosineSimilarity(left: number[], right: number[]) {
 
   if (!leftMagnitude || !rightMagnitude) return 0;
   return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+export function buildPromptEvidence(text: string, maxLength = 1200, question?: string) {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (question) {
+    const focused = buildFocusedPromptEvidence(normalized, question, maxLength);
+    if (focused) {
+      return focused;
+    }
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  const headLength = Math.floor(maxLength * 0.65);
+  const tailLength = maxLength - headLength - 7;
+  const head = normalized.slice(0, headLength).trimEnd();
+  const tail = normalized.slice(-tailLength).trimStart();
+
+  return `${head}\n[...]\n${tail}`;
+}
+
+export function toDebugRetrievedContext(results: PromptRetrievedContext[]): RetrievedContext[] {
+  return results.map(({ productId, productName, score, summary }) => ({
+    productId,
+    productName,
+    score,
+    summary,
+  }));
+}
+
+function buildFocusedPromptEvidence(text: string, question: string, maxLength: number) {
+  const tokens = extractEvidenceTokens(question);
+  if (tokens.length === 0) {
+    return "";
+  }
+
+  const windows = collectRelevantWindows(text, tokens, 220).slice(0, 3);
+  if (windows.length === 0) {
+    return "";
+  }
+
+  const titleBlock = text.slice(0, Math.min(240, Math.floor(maxLength * 0.25))).trim();
+  const snippetBlock = windows.map(({ start, end }) => text.slice(start, end).trim()).join("\n[...]\n");
+  if (snippetBlock.length >= maxLength) {
+    return `${snippetBlock.slice(0, maxLength - 7).trimEnd()}\n[...]`;
+  }
+
+  const combined = [titleBlock, snippetBlock].filter(Boolean).join("\n[...]\n");
+
+  if (combined.length <= maxLength) {
+    return combined;
+  }
+
+  return snippetBlock;
+}
+
+function extractEvidenceTokens(question: string) {
+  const stopwords = new Set([
+    "a",
+    "an",
+    "any",
+    "are",
+    "contain",
+    "contains",
+    "does",
+    "have",
+    "i",
+    "is",
+    "it",
+    "mentions",
+    "product",
+    "products",
+    "the",
+    "what",
+    "which",
+  ]);
+
+  return [...new Set(
+    question
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(/\s+/)
+      .filter((token) => token && (token.length >= 4 || /\d/.test(token)))
+      .filter((token) => !stopwords.has(token)),
+  )];
+}
+
+function collectRelevantWindows(text: string, tokens: string[], radius: number) {
+  const lowerText = text.toLowerCase();
+  const ranges: Array<{ start: number; end: number }> = [];
+
+  for (const token of tokens) {
+    const index = lowerText.indexOf(token);
+    if (index === -1) {
+      continue;
+    }
+
+    const start = Math.max(0, index - radius);
+    const end = Math.min(text.length, index + token.length + radius);
+    const previous = ranges[ranges.length - 1];
+
+    if (previous && start <= previous.end) {
+      previous.end = Math.max(previous.end, end);
+      continue;
+    }
+
+    ranges.push({ start, end });
+  }
+
+  return ranges;
 }
 
 function uniqueSorted(values: string[]) {

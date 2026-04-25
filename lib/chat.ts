@@ -7,6 +7,7 @@ import {
   resolveProductsByReference,
   retrieveRelevantDocuments,
   structuredSearchProducts,
+  toDebugRetrievedContext,
   toProductMatch,
 } from "@/lib/retrieval";
 import type {
@@ -15,6 +16,7 @@ import type {
   ChatTurn,
   ConversationState,
   PendingClarification,
+  PromptRetrievedContext,
   ProductFilters,
   ProductMatch,
   ProductRecord,
@@ -222,7 +224,7 @@ async function handleSearchIntent(
       await retrieveRelevantDocuments(filters.query, SEARCH_RESULT_LIMIT),
       SEMANTIC_MATCH_THRESHOLD,
     );
-    retrievedContext = semanticMatches;
+    retrievedContext = toDebugRetrievedContext(semanticMatches);
     const fallbackProducts = await getProductsByIds(semanticMatches.map((item) => item.productId));
     products = fallbackProducts.slice(0, SEARCH_RESULT_LIMIT);
     retrievalStrategy = semanticMatches.length > 0 ? "semantic_catalog" : "structured_search";
@@ -386,6 +388,7 @@ async function handleCatalogQaIntentStream(
     await retrieveRelevantDocuments(analysis.latestUserMessage, SEARCH_RESULT_LIMIT),
     SEMANTIC_MATCH_THRESHOLD,
   );
+  const debugRetrievedContext = toDebugRetrievedContext(retrievedContext);
 
   if (retrievedContext.length === 0) {
     const nextState = {
@@ -404,7 +407,7 @@ async function handleCatalogQaIntentStream(
       state: nextState,
       debugContext: {
         retrievalStrategy: "semantic_catalog",
-        retrievedContext,
+        retrievedContext: debugRetrievedContext,
         appliedFilters: null,
         resolvedProductIds: [],
       },
@@ -441,7 +444,7 @@ async function handleCatalogQaIntentStream(
       },
       debugContext: {
         retrievalStrategy: "semantic_catalog",
-        retrievedContext,
+        retrievedContext: debugRetrievedContext,
         appliedFilters: null,
         resolvedProductIds: products.map((product) => product.id),
       },
@@ -491,7 +494,7 @@ async function handleCatalogQaIntentStream(
     state: nextState,
     debugContext: {
       retrievalStrategy: "semantic_catalog",
-      retrievedContext,
+      retrievedContext: debugRetrievedContext,
       appliedFilters: null,
       resolvedProductIds: products.map((product) => product.id),
     },
@@ -501,14 +504,14 @@ async function handleCatalogQaIntentStream(
 function buildCatalogQaMessages(
   history: ChatTurn[],
   latestUserMessage: string,
-  context: RetrievedContext[],
+  context: PromptRetrievedContext[],
 ) {
   const evidence = context
     .map(
       (item, index) =>
         `Source ${index + 1}\nProduct: ${item.productName}\nSimilarity: ${item.score.toFixed(
           3,
-        )}\nFacts:\n${item.summary}`,
+        )}\nFacts:\n${item.evidenceText}`,
     )
     .join("\n\n");
 
@@ -516,7 +519,7 @@ function buildCatalogQaMessages(
     {
       role: "system" as const,
       content:
-        "You are a customer support assistant for a local catalog browser. Answer only from the supplied catalog evidence. Cite matching product names explicitly. If the evidence is insufficient, say that the catalog does not contain enough information. Do not invent warranty, delivery, policy, or availability details unless they appear in the evidence.",
+        "You are a customer support assistant for a local catalog browser. Answer only from the supplied catalog evidence. If any source contains the requested fact, answer with the matching product name explicitly and quote only supported facts. Say that the catalog does not contain enough information only when none of the sources contains the requested fact. Do not invent warranty, delivery, policy, or availability details unless they appear in the evidence.",
     },
     {
       role: "system" as const,
