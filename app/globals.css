@@ -160,6 +160,18 @@ textarea {
   padding: 0.85rem 1rem;
 }
 
+.meta-row {
+  margin-top: 0.75rem;
+}
+
+.price-row {
+  margin-top: 0.75rem;
+}
+
+.button-row {
+  padding-top: 0.75rem;
+}
+
 .warning {
   background: rgba(154, 95, 0, 0.1);
   color: var(--warning);
@@ -173,6 +185,11 @@ textarea {
 .muted {
   background: rgba(93, 103, 117, 0.08);
   color: var(--muted);
+}
+
+.info-card {
+  flex: 1 1 220px;
+  min-height: 100%;
 }
 
 .field {

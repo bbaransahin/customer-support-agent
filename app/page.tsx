@@ -40,8 +40,8 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="meta-row">
-            <div className="muted">CSV modified: {formatDate(status.csvModifiedAt)}</div>
-            <div className="muted">Index built: {formatDate(status.indexGeneratedAt)}</div>
+            <div className="muted info-card">CSV modified: {formatDate(status.csvModifiedAt)}</div>
+            <div className="muted info-card">Index built: {formatDate(status.indexGeneratedAt)}</div>
           </div>
           {status.warning ? <p className="warning">{status.warning}</p> : null}
           {envWarning ? <p className="warning">{envWarning}</p> : null}
