@@ -74,15 +74,67 @@ export type RetrievedContext = {
   summary: string;
 };
 
+export type ChatIntent =
+  | "search"
+  | "detail_lookup"
+  | "compare"
+  | "catalog_qa"
+  | "clarify";
+
+export type ChatResponseType =
+  | "answer"
+  | "search_results"
+  | "comparison"
+  | "clarification"
+  | "no_match";
+
+export type ProductMatch = {
+  id: string;
+  name: string;
+  brand: string;
+  category: string;
+  price: number | null;
+  confidence: number;
+};
+
+export type PendingClarification = {
+  reason: "ambiguous_product" | "missing_product" | "missing_comparison_set";
+  message: string;
+  candidateProductIds: string[];
+};
+
+export type ConversationState = {
+  activeProductIds: string[];
+  candidateProductIds: string[];
+  lastIntent: ChatIntent | null;
+  lastAppliedFilters: ProductFilters | null;
+  pendingClarification: PendingClarification | null;
+};
+
+export type ChatDebugContext = {
+  retrievalStrategy:
+    | "structured_search"
+    | "state_resolution"
+    | "semantic_catalog"
+    | "clarification"
+    | "fallback";
+  retrievedContext: RetrievedContext[];
+  appliedFilters: ProductFilters | null;
+  resolvedProductIds: string[];
+};
+
 export type ChatTurn = {
   role: "user" | "assistant";
   content: string;
 };
 
 export type ChatResponsePayload = {
-  answer: string;
-  citedProducts: string[];
-  contextSummary: RetrievedContext[];
+  message: string;
+  intent: ChatIntent;
+  responseType: ChatResponseType;
+  products: ProductMatch[];
+  state: ConversationState;
+  debugContext: ChatDebugContext;
 };
 
 export type IndexStatus = {

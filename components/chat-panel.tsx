@@ -1,18 +1,27 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import type { ChatResponsePayload, ChatTurn } from "@/lib/types";
+import { createEmptyConversationState, createEmptyDebugContext } from "@/lib/conversation-state";
+import type { ChatDebugContext, ChatResponsePayload, ChatTurn, ConversationState, ProductMatch } from "@/lib/types";
 
 type Message = ChatTurn & {
-  citedProducts?: string[];
+  responseType?: ChatResponsePayload["responseType"];
+  products?: ProductMatch[];
 };
+
+const SHOW_CHAT_DEBUG = process.env.NEXT_PUBLIC_CHAT_DEBUG === "true";
 
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [context, setContext] = useState<ChatResponsePayload["contextSummary"]>([]);
+  const [conversationState, setConversationState] = useState<ConversationState>(
+    createEmptyConversationState(),
+  );
+  const [debugContext, setDebugContext] = useState<ChatDebugContext>({
+    ...createEmptyDebugContext(),
+  });
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,7 +41,11 @@ export function ChatPanel() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          history: nextMessages.map(({ role, content: body }) => ({ role, content: body })),
+          history: nextMessages.map(({ role, content: body }) => ({
+            role,
+            content: body,
+          })),
+          state: conversationState,
         }),
       });
 
@@ -45,11 +58,13 @@ export function ChatPanel() {
         ...nextMessages,
         {
           role: "assistant",
-          content: payload.answer,
-          citedProducts: payload.citedProducts,
+          content: payload.message,
+          responseType: payload.responseType,
+          products: payload.products,
         },
       ]);
-      setContext(payload.contextSummary);
+      setConversationState(payload.state);
+      setDebugContext(payload.debugContext);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Chat request failed.");
     } finally {
@@ -77,12 +92,15 @@ export function ChatPanel() {
                 <strong>{message.role === "assistant" ? "Support agent" : "You"}</strong>
               </header>
               <p>{message.content}</p>
-              {message.citedProducts?.length ? (
-                <div className="chat-citations">
-                  {message.citedProducts.map((product) => (
-                    <span className="chip" key={product}>
-                      {product}
-                    </span>
+              {message.role === "assistant" && message.products?.length ? (
+                <div className="page-grid">
+                  {message.products.map((product) => (
+                    <div className="detail-card" key={product.id}>
+                      <strong>{product.name}</strong>
+                      <p>{product.brand}</p>
+                      <p>{product.category}</p>
+                      <p>{typeof product.price === "number" ? `Rs. ${product.price}` : "Price not listed"}</p>
+                    </div>
                   ))}
                 </div>
               ) : null}
@@ -109,22 +127,30 @@ export function ChatPanel() {
         </form>
       </section>
 
-      <aside className="panel">
-        <h2>Retrieved context</h2>
-        {context.length === 0 ? (
-          <p className="muted">The latest answer has not retrieved any local evidence yet.</p>
-        ) : (
-          <div className="page-grid">
-            {context.map((item) => (
-              <div className="detail-card" key={`${item.productId}-${item.productName}`}>
-                <strong>{item.productName}</strong>
-                <p>Similarity: {item.score.toFixed(3)}</p>
-                <p>{item.summary}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </aside>
+      {SHOW_CHAT_DEBUG ? (
+        <aside className="panel">
+          <h2>Chat debug</h2>
+          <p>Strategy: {debugContext.retrievalStrategy}</p>
+          {debugContext.appliedFilters ? (
+            <p>
+              Filters: {JSON.stringify(debugContext.appliedFilters)}
+            </p>
+          ) : null}
+          {debugContext.retrievedContext.length === 0 ? (
+            <p className="muted">The latest answer did not use semantic catalog evidence.</p>
+          ) : (
+            <div className="page-grid">
+              {debugContext.retrievedContext.map((item) => (
+                <div className="detail-card" key={`${item.productId}-${item.productName}`}>
+                  <strong>{item.productName}</strong>
+                  <p>Similarity: {item.score.toFixed(3)}</p>
+                  <p>{item.summary}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
+      ) : null}
     </div>
   );
 }

@@ -53,6 +53,14 @@ describe("retrieval utilities", () => {
     ).toHaveLength(1);
   });
 
+  it("matches pluralized query tokens against catalog search text", () => {
+    expect(
+      filterProducts(products, {
+        query: "sofas",
+      }),
+    ).toHaveLength(1);
+  });
+
   it("scores vectors with cosine similarity", () => {
     expect(cosineSimilarity([1, 0], [1, 0])).toBeCloseTo(1);
     expect(cosineSimilarity([1, 0], [0, 1])).toBeCloseTo(0);
