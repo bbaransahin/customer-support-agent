@@ -93,9 +93,19 @@ type TurnAnalysis = {
   shouldFindCheaper: boolean;
 };
 
+type StreamTextCallback = (delta: string) => Promise<void> | void;
+
 export async function answerCatalogQuestion(
   history: ChatTurn[],
   state: ConversationState = createEmptyConversationState(),
+): Promise<ChatResponsePayload> {
+  return answerCatalogQuestionStream(history, state);
+}
+
+export async function answerCatalogQuestionStream(
+  history: ChatTurn[],
+  state: ConversationState = createEmptyConversationState(),
+  onDelta?: StreamTextCallback,
 ): Promise<ChatResponsePayload> {
   const latestUserTurn = [...history].reverse().find((turn) => turn.role === "user");
   if (!latestUserTurn) {
@@ -106,26 +116,34 @@ export async function answerCatalogQuestion(
   const analysis = analyzeTurn(latestUserTurn.content, state, catalog);
 
   if (analysis.intent === "search") {
-    return handleSearchIntent(analysis, state, catalog);
+    const response = await handleSearchIntent(analysis, state, catalog);
+    await streamMessageText(response.message, onDelta);
+    return response;
   }
 
   if (analysis.intent === "detail_lookup") {
-    return handleDetailIntent(analysis, state, catalog);
+    const response = await handleDetailIntent(analysis, state, catalog);
+    await streamMessageText(response.message, onDelta);
+    return response;
   }
 
   if (analysis.intent === "compare") {
-    return handleCompareIntent(analysis, state, catalog);
+    const response = await handleCompareIntent(analysis, state, catalog);
+    await streamMessageText(response.message, onDelta);
+    return response;
   }
 
   if (analysis.intent === "clarify") {
-    return buildClarificationResponse("clarify", state, {
+    const response = buildClarificationResponse("clarify", state, {
       reason: "ambiguous_product",
       message: "I need a more specific product reference. Name the product or refer to a result position like first or second.",
       candidateProductIds: state.candidateProductIds,
     });
+    await streamMessageText(response.message, onDelta);
+    return response;
   }
 
-  return handleCatalogQaIntent(history, analysis, state);
+  return handleCatalogQaIntentStream(history, analysis, state, onDelta);
 }
 
 function analyzeTurn(
@@ -354,10 +372,11 @@ async function handleCompareIntent(
   };
 }
 
-async function handleCatalogQaIntent(
+async function handleCatalogQaIntentStream(
   history: ChatTurn[],
   analysis: TurnAnalysis,
   state: ConversationState,
+  onDelta?: StreamTextCallback,
 ): Promise<ChatResponsePayload> {
   const retrievedContext = pickConfidentDocuments(
     await retrieveRelevantDocuments(analysis.latestUserMessage, SEARCH_RESULT_LIMIT),
@@ -373,7 +392,7 @@ async function handleCatalogQaIntent(
       pendingClarification: null,
     };
 
-    return {
+    const response = {
       message: "The catalog does not contain enough information to answer that confidently.",
       intent: "catalog_qa",
       responseType: "no_match",
@@ -386,14 +405,71 @@ async function handleCatalogQaIntent(
         resolvedProductIds: [],
       },
     };
+    await streamMessageText(response.message, onDelta);
+    return response;
   }
 
   const products = await getProductsByIds(retrievedContext.map((item) => item.productId));
   const client = getOpenAIClient();
-  const response = await client.responses.create({
+  const stream = await client.responses.create({
     model: CHAT_MODEL,
     input: buildCatalogQaMessages(history, analysis.latestUserMessage, retrievedContext),
+    stream: true,
   });
+
+  if (!Symbol.asyncIterator || !(Symbol.asyncIterator in stream)) {
+    const message = "output_text" in stream ? stream.output_text.trim() : "";
+    if (!message) {
+      throw new Error("The model returned an empty response.");
+    }
+
+    return {
+      message,
+      intent: "catalog_qa",
+      responseType: "answer",
+      products: products.map((product) => toProductMatch(product, 1)),
+      state: {
+        ...state,
+        activeProductIds: products.length === 1 ? [products[0].id] : [],
+        candidateProductIds: products.map((product) => product.id),
+        lastIntent: "catalog_qa" as const,
+        pendingClarification: null,
+      },
+      debugContext: {
+        retrievalStrategy: "semantic_catalog",
+        retrievedContext,
+        appliedFilters: null,
+        resolvedProductIds: products.map((product) => product.id),
+      },
+    };
+  }
+
+  let streamedMessage = "";
+  let completedMessage = "";
+
+  for await (const event of stream) {
+    if (event.type === "response.output_text.delta") {
+      streamedMessage += event.delta;
+      await onDelta?.(event.delta);
+    }
+
+    if (event.type === "response.completed") {
+      completedMessage = event.response.output_text.trim();
+    }
+
+    if (event.type === "response.failed") {
+      throw new Error("The model could not complete the response.");
+    }
+
+    if (event.type === "error") {
+      throw new Error(event.message);
+    }
+  }
+
+  const message = completedMessage || streamedMessage.trim();
+  if (!message) {
+    throw new Error("The model returned an empty response.");
+  }
 
   const nextState = {
     ...state,
@@ -404,7 +480,7 @@ async function handleCatalogQaIntent(
   };
 
   return {
-    message: response.output_text.trim(),
+    message,
     intent: "catalog_qa",
     responseType: "answer",
     products: products.map((product) => toProductMatch(product, 1)),
@@ -451,6 +527,17 @@ function buildCatalogQaMessages(
       content: latestUserMessage,
     },
   ];
+}
+
+async function streamMessageText(message: string, onDelta?: StreamTextCallback) {
+  if (!onDelta || !message) {
+    return;
+  }
+
+  const chunks = message.match(/\S+\s*/g) ?? [message];
+  for (const chunk of chunks) {
+    await onDelta(chunk);
+  }
 }
 
 function buildSearchFilters(

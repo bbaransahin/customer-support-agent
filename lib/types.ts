@@ -137,6 +137,20 @@ export type ChatResponsePayload = {
   debugContext: ChatDebugContext;
 };
 
+export type ChatStreamEvent =
+  | {
+      type: "delta";
+      delta: string;
+    }
+  | {
+      type: "done";
+      payload: ChatResponsePayload;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
+
 export type IndexStatus = {
   exists: boolean;
   isFresh: boolean;

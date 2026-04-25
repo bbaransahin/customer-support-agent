@@ -2,7 +2,14 @@
 
 import { FormEvent, useState } from "react";
 import { createEmptyConversationState, createEmptyDebugContext } from "@/lib/conversation-state";
-import type { ChatDebugContext, ChatResponsePayload, ChatTurn, ConversationState, ProductMatch } from "@/lib/types";
+import type {
+  ChatDebugContext,
+  ChatResponsePayload,
+  ChatStreamEvent,
+  ChatTurn,
+  ConversationState,
+  ProductMatch,
+} from "@/lib/types";
 
 type Message = ChatTurn & {
   responseType?: ChatResponsePayload["responseType"];
@@ -29,6 +36,7 @@ export function ChatPanel() {
     if (!content || loading) return;
 
     const nextMessages = [...messages, { role: "user" as const, content }];
+    const assistantMessageIndex = nextMessages.length;
     setMessages(nextMessages);
     setInput("");
     setLoading(true);
@@ -48,6 +56,103 @@ export function ChatPanel() {
           state: conversationState,
         }),
       });
+
+      const contentType = response.headers?.get?.("content-type") ?? "";
+
+      if (response.body && contentType.includes("text/event-stream")) {
+        setMessages([
+          ...nextMessages,
+          {
+            role: "assistant",
+            content: "",
+            products: [],
+            responseType: "answer",
+          },
+        ]);
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalPayload: ChatResponsePayload | null = null;
+
+        const applyAssistantDelta = (delta: string) => {
+          setMessages((currentMessages) =>
+            currentMessages.map((message, index) =>
+              index === assistantMessageIndex
+                ? {
+                    ...message,
+                    content: message.content + delta,
+                  }
+                : message,
+            ),
+          );
+        };
+
+        const applyCompletedPayload = (payload: ChatResponsePayload) => {
+          setMessages((currentMessages) =>
+            currentMessages.map((message, index) =>
+              index === assistantMessageIndex
+                ? {
+                    ...message,
+                    role: "assistant",
+                    content: payload.message,
+                    responseType: payload.responseType,
+                    products: payload.products,
+                  }
+                : message,
+            ),
+          );
+          setConversationState(payload.state);
+          setDebugContext(payload.debugContext);
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex >= 0) {
+            const rawEvent = buffer.slice(0, boundaryIndex).trim();
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            if (rawEvent) {
+              const data = rawEvent
+                .split("\n")
+                .filter((line) => line.startsWith("data:"))
+                .map((line) => line.slice(5).trimStart())
+                .join("\n");
+
+              if (data) {
+                const event = JSON.parse(data) as ChatStreamEvent;
+                if (event.type === "delta") {
+                  applyAssistantDelta(event.delta);
+                }
+
+                if (event.type === "done") {
+                  finalPayload = event.payload;
+                  applyCompletedPayload(event.payload);
+                }
+
+                if (event.type === "error") {
+                  throw new Error(event.error);
+                }
+              }
+            }
+
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+
+          if (done) {
+            break;
+          }
+        }
+
+        if (!finalPayload) {
+          throw new Error(response.ok ? "Chat stream ended before completion." : "Chat request failed.");
+        }
+
+        return;
+      }
 
       const payload = (await response.json()) as ChatResponsePayload & { error?: string };
       if (!response.ok) {

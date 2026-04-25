@@ -3,36 +3,62 @@ import { ChatPanel } from "@/components/chat-panel";
 
 describe("ChatPanel", () => {
   it("shows structured assistant results without debug details by default", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: "delta",
+              delta: "I found 1 ",
+            })}\n\n`,
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: "done",
+              payload: {
+                message: "I found 1 matching product.",
+                intent: "search",
+                responseType: "search_results",
+                products: [
+                  {
+                    id: "1",
+                    name: "Alpha Sofa",
+                    brand: "FabHomeDecor",
+                    category: "Furniture",
+                    price: 22000,
+                    confidence: 1,
+                  },
+                ],
+                state: {
+                  activeProductIds: ["1"],
+                  candidateProductIds: ["1"],
+                  lastIntent: "search",
+                  lastAppliedFilters: { query: "sofa" },
+                  pendingClarification: null,
+                },
+                debugContext: {
+                  retrievalStrategy: "structured_search",
+                  retrievedContext: [],
+                  appliedFilters: { query: "sofa" },
+                  resolvedProductIds: ["1"],
+                },
+              },
+            })}\n\n`,
+          ),
+        );
+        controller.close();
+      },
+    });
+
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        message: "I found 1 matching product.",
-        intent: "search",
-        responseType: "search_results",
-        products: [
-          {
-            id: "1",
-            name: "Alpha Sofa",
-            brand: "FabHomeDecor",
-            category: "Furniture",
-            price: 22000,
-            confidence: 1,
-          },
-        ],
-        state: {
-          activeProductIds: ["1"],
-          candidateProductIds: ["1"],
-          lastIntent: "search",
-          lastAppliedFilters: { query: "sofa" },
-          pendingClarification: null,
-        },
-        debugContext: {
-          retrievalStrategy: "structured_search",
-          retrievedContext: [],
-          appliedFilters: { query: "sofa" },
-          resolvedProductIds: ["1"],
-        },
-      }),
+      body,
+      headers: {
+        get: (name: string) => (name === "content-type" ? "text/event-stream" : null),
+      },
     });
 
     vi.stubGlobal("fetch", fetchMock);
